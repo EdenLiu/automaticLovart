@@ -1,0 +1,5 @@
+node_modules/
+.auth/
+picture_lovart/
+run-report.json
+*.log

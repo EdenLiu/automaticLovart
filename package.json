@@ -1,0 +1,21 @@
+{
+  "name": "automatic-lovart",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lovart browser automation agent for isolated prompt-to-image tasks.",
+  "type": "commonjs",
+  "scripts": {
+    "auth": "node src/auth.js",
+    "auth:chrome": "node src/auth-real-chrome.js",
+    "run": "node src/run.js",
+    "run:headed": "HEADLESS=false node src/run.js",
+    "install:browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.54.2",
+    "ws": "^8.21.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

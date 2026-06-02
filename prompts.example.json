@@ -1,0 +1,12 @@
+{
+  "tasks": [
+    {
+      "id": "task_001",
+      "prompt": "Create a square poster image for a modern tea brand named GREEN HARBOR. Use fresh green tea leaves, clean typography, and a premium but calm visual style."
+    },
+    {
+      "id": "task_002",
+      "prompt": "Generate a product hero image for a minimalist ceramic coffee mug on a kitchen counter, warm morning light, editorial photography style."
+    }
+  ]
+}
