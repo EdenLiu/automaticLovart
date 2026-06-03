@@ -48,7 +48,7 @@ class LovartAgent {
     }
 
     const context = await browser.newContext(contextOptions);
-    const page = await context.newPage();
+    let page = await context.newPage();
     page.setDefaultTimeout(this.config.promptSubmitTimeoutMs);
     page.setDefaultNavigationTimeout(this.config.navigationTimeoutMs);
 
@@ -152,32 +152,18 @@ class LovartAgent {
   }
 
   async hasPromptInput(page, timeoutMs) {
-    return Boolean(await findFirstVisible(page, this.config.selectors.promptInputs || [], timeoutMs));
+    return Boolean(await findPromptInput(page, this.config.selectors.promptInputs || [], timeoutMs));
   }
 
   async sendMessage(page, message) {
-    const input = await findFirstVisible(page, this.config.selectors.promptInputs || [], this.config.promptSubmitTimeoutMs);
+    const input = await findPromptInput(page, this.config.selectors.promptInputs || [], this.config.promptSubmitTimeoutMs);
     if (!input) {
       throw new Error("Prompt input was not found.");
     }
 
-    await input.click();
-    const tagName = await input.evaluate((node) => node.tagName.toLowerCase()).catch(() => "");
-    const isContentEditable = await input.evaluate((node) => node.isContentEditable).catch(() => false);
+    await writePromptText(page, input, message);
 
-    if (tagName === "textarea" || tagName === "input") {
-      await input.fill(message);
-    } else if (isContentEditable) {
-      await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
-      await page.keyboard.press("Backspace").catch(() => {});
-      await page.keyboard.insertText(message);
-    } else {
-      await input.fill(message).catch(async () => {
-        await page.keyboard.insertText(message);
-      });
-    }
-
-    const submittedByButton = await this.clickSubmitButton(page);
+    const submittedByButton = await this.clickSubmitButton(page, input);
     if (!submittedByButton) {
       await page.keyboard.press("Enter");
     }
@@ -185,16 +171,31 @@ class LovartAgent {
     await page.waitForTimeout(1500);
   }
 
-  async clickSubmitButton(page) {
+  async clickSubmitButton(page, input) {
     const selectors = this.config.selectors.submitButtons || [];
     for (const selector of selectors) {
       const button = page.locator(selector).last();
       if (!(await isVisible(button, 1000))) continue;
       const disabled = await button.evaluate((node) => node.disabled || node.getAttribute("aria-disabled") === "true").catch(() => false);
       if (disabled) continue;
-      await button.click().catch(() => {});
-      return true;
+      try {
+        await button.click();
+        return true;
+      } catch (_) {
+        continue;
+      }
     }
+
+    const nearbyButton = await findNearbySubmitButton(page, input);
+    if (nearbyButton) {
+      try {
+        await nearbyButton.click();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
     return false;
   }
 
@@ -338,18 +339,166 @@ class LovartAgent {
   }
 }
 
-async function findFirstVisible(page, selectors, timeoutMs) {
+async function findPromptInput(page, selectors, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     for (const selector of selectors) {
-      const locator = page.locator(selector).last();
-      if (await isVisible(locator, 500)) {
-        return locator;
+      const locators = page.locator(selector);
+      const count = await locators.count().catch(() => 0);
+      for (let i = count - 1; i >= 0; i -= 1) {
+        const locator = locators.nth(i);
+        const details = await locator.evaluate((node) => {
+          const style = window.getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          const tagName = node.tagName.toLowerCase();
+          const role = node.getAttribute("role") || "";
+          const disabled = Boolean(node.disabled) || node.getAttribute("aria-disabled") === "true";
+          const readOnly = Boolean(node.readOnly) || node.getAttribute("aria-readonly") === "true";
+          const visible = style.visibility !== "hidden"
+            && style.display !== "none"
+            && Number(style.opacity || 1) !== 0
+            && rect.width >= 120
+            && rect.height >= 24;
+          const editable = !disabled
+            && !readOnly
+            && (tagName === "textarea"
+              || tagName === "input"
+              || node.isContentEditable
+              || role === "textbox");
+
+          return {
+            editable,
+            visible,
+          };
+        }).catch(() => null);
+
+        if (details?.visible && details.editable) {
+          return locator;
+        }
       }
     }
     await page.waitForTimeout(500);
   }
   return null;
+}
+
+async function writePromptText(page, input, message) {
+  await input.scrollIntoViewIfNeeded().catch(() => {});
+  await input.click({ force: true });
+
+  const tagName = await input.evaluate((node) => node.tagName.toLowerCase()).catch(() => "");
+  const isFormInput = tagName === "textarea" || tagName === "input";
+
+  if (isFormInput) {
+    await input.fill(message);
+  } else {
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
+    await page.keyboard.press("Backspace").catch(() => {});
+    await page.keyboard.insertText(message);
+  }
+
+  if (await promptContainsText(input, message)) {
+    return;
+  }
+
+  await input.evaluate((node, value) => {
+    node.focus();
+    const tagName = node.tagName.toLowerCase();
+    if (tagName === "textarea" || tagName === "input") {
+      const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), "value");
+      if (descriptor?.set) {
+        descriptor.set.call(node, value);
+      } else {
+        node.value = value;
+      }
+    } else {
+      node.textContent = value;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+  }, message);
+
+  if (!(await promptContainsText(input, message))) {
+    throw new Error("Prompt input was found, but the prompt text could not be written.");
+  }
+}
+
+async function promptContainsText(input, message) {
+  const expected = normalizePromptText(message).slice(0, 120);
+  if (!expected) return true;
+
+  const actual = await input.evaluate((node) => {
+    const tagName = node.tagName.toLowerCase();
+    if (tagName === "textarea" || tagName === "input") {
+      return node.value || "";
+    }
+    return node.innerText || node.textContent || "";
+  }).catch(() => "");
+
+  return normalizePromptText(actual).includes(expected);
+}
+
+function normalizePromptText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+async function findNearbySubmitButton(page, input) {
+  const inputBox = await input.boundingBox().catch(() => null);
+  if (!inputBox) return null;
+
+  const buttons = page.locator("button");
+  const count = await buttons.count().catch(() => 0);
+  let best = null;
+
+  for (let i = 0; i < count; i += 1) {
+    const button = buttons.nth(i);
+    const details = await button.evaluate((node, box) => {
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const disabled = Boolean(node.disabled) || node.getAttribute("aria-disabled") === "true";
+      const visible = style.visibility !== "hidden"
+        && style.display !== "none"
+        && Number(style.opacity || 1) !== 0
+        && rect.width >= 20
+        && rect.height >= 20;
+      const inputRight = box.x + box.width;
+      const inputBottom = box.y + box.height;
+      const inPromptRegion = rect.left >= box.x - 24
+        && rect.right <= inputRight + 24
+        && rect.top >= box.y - 8
+        && rect.bottom <= inputBottom + 80;
+      const nearBottomRight = rect.left >= inputRight - 140
+        && rect.top >= inputBottom - 16
+        && rect.bottom <= inputBottom + 80;
+      const label = [
+        node.getAttribute("aria-label") || "",
+        node.getAttribute("title") || "",
+        node.textContent || "",
+      ].join(" ");
+      const likelySubmit = /send|submit|generate|create|arrow|发送|提交|生成|创建/i.test(label)
+        || (inPromptRegion && nearBottomRight);
+
+      return {
+        disabled,
+        visible,
+        likelySubmit,
+        distance: Math.abs(inputRight - rect.right) + Math.abs(inputBottom - rect.bottom),
+      };
+    }, inputBox).catch(() => null);
+
+    if (!details?.visible || details.disabled || !details.likelySubmit) continue;
+    if (!best || details.distance < best.distance) {
+      best = { locator: button, distance: details.distance };
+    }
+  }
+
+  return best?.locator || null;
 }
 
 async function isVisible(locator, timeoutMs) {
