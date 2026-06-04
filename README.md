@@ -4,9 +4,10 @@
 
 ## 准备
 
+运行这个工具需要安装本机 Google Chrome。Lovart/登录校验可能会拒绝 Playwright 自带的 Chromium，所以不要只依赖 `npm run install:browsers` 下载的浏览器。
+
 ```bash
 npm install
-npm run install:browsers
 cp prompts.example.json prompts.json
 ```
 
@@ -14,7 +15,7 @@ cp prompts.example.json prompts.json
 
 ## 保存 Lovart 登录态
 
-推荐使用真实 Google Chrome 保存登录态，避免 Google OAuth 拦截 Chrome for Testing：
+使用真实 Google Chrome 保存登录态，避免 Google OAuth 或 Lovart 校验拦截 Chrome for Testing：
 
 ```bash
 npm run auth:chrome
@@ -22,7 +23,7 @@ npm run auth:chrome
 
 脚本会用你本机安装的 Google Chrome 打开 Lovart。你手动登录完成后，回到终端按 Enter，登录态会保存到 `.auth/lovart.storage.json`。脚本不会保存账号密码。
 
-如果你不用 Google 登录，也可以尝试旧的 Playwright 登录方式：
+旧的 Playwright Chromium 登录方式保留在脚本里，但如果遇到校验失败，不建议用于分享部署：
 
 ```bash
 npm run auth
