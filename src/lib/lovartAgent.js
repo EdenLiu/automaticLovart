@@ -207,16 +207,13 @@ class LovartAgent {
     while (Date.now() < deadline) {
       const candidates = await collectImageCandidates(page, this.config.minImageEdgePx);
       const fresh = candidates.filter((candidate) => {
-        if (!candidate.fingerprint || baseline.has(candidate.fingerprint) || seen.has(candidate.fingerprint)) {
-          return false;
-        }
-        seen.add(candidate.fingerprint);
-        return true;
+        return candidate.fingerprint && !baseline.has(candidate.fingerprint) && !seen.has(candidate.fingerprint);
       });
 
       for (const candidate of fresh) {
         const image = await this.saveCandidate(page, context, candidate, taskDir, task.id, existingCount + saved.length + 1);
         if (image) {
+          seen.add(candidate.fingerprint);
           saved.push(image);
         }
       }
@@ -241,7 +238,7 @@ class LovartAgent {
 
       if (candidate.src.startsWith("data:")) {
         const parsed = parseDataUrl(candidate.src);
-        if (!parsed) return null;
+        if (!parsed) return await this.saveCandidateScreenshot(page, candidate, taskDir, taskId, index);
         buffer = parsed.buffer;
         contentType = parsed.contentType;
       } else if (candidate.src.startsWith("blob:")) {
@@ -260,12 +257,12 @@ class LovartAgent {
           headers: { referer: this.config.lovartUrl },
           timeout: this.config.promptSubmitTimeoutMs,
         });
-        if (!response.ok()) return null;
+        if (!response.ok()) return await this.saveCandidateScreenshot(page, candidate, taskDir, taskId, index);
         contentType = response.headers()["content-type"] || "";
         buffer = await response.body();
       }
 
-      return await saveValidatedImage({
+      const image = await saveValidatedImage({
         buffer,
         taskDir,
         taskId,
@@ -280,9 +277,39 @@ class LovartAgent {
           height: candidate.naturalHeight,
         },
       });
+      if (image) return image;
+
+      return await this.saveCandidateScreenshot(page, candidate, taskDir, taskId, index);
     } catch (_) {
-      return null;
+      return await this.saveCandidateScreenshot(page, candidate, taskDir, taskId, index);
     }
+  }
+
+  async saveCandidateScreenshot(page, candidate, taskDir, taskId, index) {
+    if (!candidate.domId) return null;
+
+    const locator = page.locator(`[data-lovart-agent-image-id="${candidate.domId}"]`).first();
+    if (!(await isVisible(locator, 500))) return null;
+
+    const box = await locator.boundingBox().catch(() => null);
+    if (!box || Math.max(box.width, box.height) < this.config.minImageEdgePx) return null;
+
+    const buffer = await locator.screenshot({ type: "png" }).catch(() => null);
+    return await saveValidatedImage({
+      buffer,
+      taskDir,
+      taskId,
+      index,
+      minImageBytes: this.config.minImageBytes,
+      preferredExtension: ".png",
+      source: {
+        type: `${candidate.kind || "image"}-element-screenshot`,
+        url: candidate.src?.startsWith("data:") ? "data-url" : candidate.src,
+        alt: candidate.alt,
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      },
+    });
   }
 
   async saveNewCanvasScreenshots(page, canvasBaseline, taskDir, taskId, startIndex) {
@@ -554,6 +581,17 @@ async function collectImageCandidates(page, minEdgePx) {
       return match ? absoluteUrl(match[1]) : "";
     }
 
+    function markCandidateNode(node) {
+      if (!window.__lovartAgentImageId) {
+        window.__lovartAgentImageId = 1;
+      }
+      if (!node.dataset.lovartAgentImageId) {
+        node.dataset.lovartAgentImageId = `candidate-${window.__lovartAgentImageId}`;
+        window.__lovartAgentImageId += 1;
+      }
+      return node.dataset.lovartAgentImageId;
+    }
+
     const candidates = [];
     for (const img of Array.from(document.images)) {
       const rect = img.getBoundingClientRect();
@@ -568,6 +606,7 @@ async function collectImageCandidates(page, minEdgePx) {
         alt: img.alt || "",
         naturalWidth,
         naturalHeight,
+        domId: markCandidateNode(img),
         fingerprint: `img:${src}`,
       });
     }
@@ -582,6 +621,7 @@ async function collectImageCandidates(page, minEdgePx) {
         alt: anchor.textContent || "",
         naturalWidth: Math.round(rect.width),
         naturalHeight: Math.round(rect.height),
+        domId: markCandidateNode(anchor),
         fingerprint: `link:${href}`,
       });
     }
@@ -597,6 +637,7 @@ async function collectImageCandidates(page, minEdgePx) {
         alt: "",
         naturalWidth: Math.round(rect.width),
         naturalHeight: Math.round(rect.height),
+        domId: markCandidateNode(node),
         fingerprint: `background:${bg}`,
       });
     }
