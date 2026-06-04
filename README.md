@@ -11,7 +11,7 @@ npm install
 cp prompts.example.json prompts.json
 ```
 
-编辑 `prompts.json`，每个任务必须有唯一 `id` 和 `prompt`。
+编辑 `prompts.json`，每个任务只需要写 `prompt`。任务 id 会由程序自动按 `task_001`、`task_002` 的格式自增生成，并记录在 `.auth/task-state.json`。
 
 ## 保存 Lovart 登录态
 
@@ -41,6 +41,14 @@ npm run run:headed
 npm run run
 ```
 
+定时运行。下面的命令会等到本地时间 23:30 再开始执行；如果当前时间已经晚于 23:30，则预约到明天 23:30：
+
+```bash
+npm run run -- --start-at 23:30
+```
+
+定时等待和任务运行期间，程序会尝试阻止系统休眠，直到本次进程结束。macOS 使用系统自带的 `caffeinate`；Linux 使用 `systemd-inhibit`。如果当前系统不支持，会在终端打印警告并继续执行。
+
 输出结构：
 
 ```text
@@ -62,6 +70,7 @@ run-report.json
 
 - `maxRounds`: 最大交互轮数，默认 6。
 - `generationWaitMs`: 每轮等待图片生成的最长时间。
+- `taskStatePath`: 自动任务 id 的本地状态文件路径，默认 `.auth/task-state.json`。
 - `selectors`: Lovart 页面选择器。如果 Lovart 改版，优先调整这里。
 - `followUpPrompt`: 当 Lovart 询问更多信息或未生成图片时，agent 发送的追问。
 

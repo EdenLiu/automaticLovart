@@ -1,6 +1,7 @@
 {
   "lovartUrl": "https://www.lovart.ai/",
   "storageStatePath": "./.auth/lovart.storage.json",
+  "taskStatePath": "./.auth/task-state.json",
   "tasksPath": "./prompts.json",
   "outputDir": "./picture_lovart",
   "maxRounds": 6,
