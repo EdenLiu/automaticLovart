@@ -68,7 +68,8 @@ class LovartAgent {
       const baseline = await collectImageFingerprints(page);
       const canvasBaseline = await collectCanvasFingerprints(page);
       const firstPrompt = buildInitialPrompt(task.prompt);
-      await this.sendMessage(page, firstPrompt);
+      page = await this.sendMessage(context, page, firstPrompt);
+      await this.waitBeforeImageScan(page);
       taskLog.rounds = 1;
 
       while (taskLog.rounds <= this.config.maxRounds) {
@@ -97,7 +98,8 @@ class LovartAgent {
 
         const responseText = await this.readRecentLovartText(page);
         const followUp = buildFollowUpPrompt(task, responseText, taskLog.rounds, this.config);
-        await this.sendMessage(page, followUp);
+        page = await this.sendMessage(context, page, followUp);
+        await this.waitBeforeImageScan(page);
         taskLog.rounds += 1;
       }
 
@@ -155,7 +157,7 @@ class LovartAgent {
     return Boolean(await findPromptInput(page, this.config.selectors.promptInputs || [], timeoutMs));
   }
 
-  async sendMessage(page, message) {
+  async sendMessage(context, page, message) {
     const input = await findPromptInput(page, this.config.selectors.promptInputs || [], this.config.promptSubmitTimeoutMs);
     if (!input) {
       throw new Error("Prompt input was not found.");
@@ -168,7 +170,34 @@ class LovartAgent {
       await page.keyboard.press("Enter");
     }
 
+    page = await this.waitForCanvasPage(context, page, this.config.postSubmitNavigationTimeoutMs || this.config.promptSubmitTimeoutMs);
     await page.waitForTimeout(1500);
+    return page;
+  }
+
+  async waitForCanvasPage(context, page, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const canvasPage = context.pages().find((candidate) => isLovartCanvasUrl(candidate.url()));
+      if (canvasPage) {
+        await canvasPage.waitForLoadState("domcontentloaded").catch(() => {});
+        return canvasPage;
+      }
+      if (isLovartCanvasUrl(page.url())) {
+        await page.waitForLoadState("domcontentloaded").catch(() => {});
+        return page;
+      }
+      await page.waitForTimeout(500);
+    }
+
+    return page;
+  }
+
+  async waitBeforeImageScan(page) {
+    const waitMs = Number(this.config.canvasGenerationMinWaitMs || 0);
+    if (waitMs > 0 && isLovartCanvasUrl(page.url())) {
+      await page.waitForTimeout(waitMs);
+    }
   }
 
   async clickSubmitButton(page, input) {
@@ -206,11 +235,13 @@ class LovartAgent {
 
     while (Date.now() < deadline) {
       const candidates = await collectImageCandidates(page, this.config.minImageEdgePx);
-      const fresh = candidates.filter((candidate) => {
+      const generatedCandidates = candidates.filter((candidate) => isGeneratedImageCandidate(candidate, this.config));
+      const fresh = generatedCandidates.filter((candidate) => {
         return candidate.fingerprint && !baseline.has(candidate.fingerprint) && !seen.has(candidate.fingerprint);
       });
+      const bestCandidates = selectBestGeneratedCandidates(fresh);
 
-      for (const candidate of fresh) {
+      for (const candidate of bestCandidates) {
         const image = await this.saveCandidate(page, context, candidate, taskDir, task.id, existingCount + saved.length + 1);
         if (image) {
           seen.add(candidate.fingerprint);
@@ -218,8 +249,10 @@ class LovartAgent {
         }
       }
 
-      const canvasImages = await this.saveNewCanvasScreenshots(page, canvasBaseline, taskDir, task.id, existingCount + saved.length + 1);
-      saved.push(...canvasImages);
+      if (this.config.captureCanvasScreenshots) {
+        const canvasImages = await this.saveNewCanvasScreenshots(page, canvasBaseline, taskDir, task.id, existingCount + saved.length + 1);
+        saved.push(...canvasImages);
+      }
 
       if (saved.length > 0) {
         return saved;
@@ -473,6 +506,48 @@ async function promptContainsText(input, message) {
 
 function normalizePromptText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function isLovartCanvasUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname.endsWith("lovart.ai") && url.pathname === "/canvas" && url.searchParams.has("projectId");
+  } catch (_) {
+    return false;
+  }
+}
+
+function isGeneratedImageCandidate(candidate, config) {
+  const src = candidate?.src || "";
+  if (!src || isIgnoredImageUrl(src, config)) return false;
+  try {
+    const url = new URL(src);
+    return url.hostname === "a.lovart.ai" && url.pathname.startsWith("/artifacts/agent/");
+  } catch (_) {
+    return false;
+  }
+}
+
+function isIgnoredImageUrl(src, config) {
+  const ignored = config.ignoredImageUrls || [];
+  return ignored.some((value) => src === value || src.includes(value) || value.includes(src))
+    || /\/lovart_assets\/loading[^/]*\.gif/i.test(src);
+}
+
+function selectBestGeneratedCandidates(candidates) {
+  if (candidates.length <= 1) return candidates;
+
+  const sorted = [...candidates].sort((a, b) => imageCandidateScore(b) - imageCandidateScore(a));
+  return [sorted[0]];
+}
+
+function imageCandidateScore(candidate) {
+  const src = candidate?.src || "";
+  const widthMatch = /[?&,]w_(\d+)/i.exec(src);
+  const resizedWidth = widthMatch ? Number(widthMatch[1]) : 0;
+  const isOriginalArtifact = /^https:\/\/a\.lovart\.ai\/artifacts\/agent\/[^?]+$/i.test(src);
+  if (isOriginalArtifact) return 100000;
+  return Math.max(resizedWidth, Number(candidate?.naturalWidth || 0), Number(candidate?.naturalHeight || 0));
 }
 
 async function findNearbySubmitButton(page, input) {

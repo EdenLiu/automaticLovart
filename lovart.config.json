@@ -10,10 +10,16 @@
   "realChromeUserDataDir": "./.auth/real-chrome-profile",
   "navigationTimeoutMs": 90000,
   "promptSubmitTimeoutMs": 45000,
+  "postSubmitNavigationTimeoutMs": 45000,
+  "canvasGenerationMinWaitMs": 120000,
   "generationWaitMs": 600000,
   "pollIntervalMs": 5000,
   "minImageBytes": 4096,
   "minImageEdgePx": 160,
+  "captureCanvasScreenshots": false,
+  "ignoredImageUrls": [
+    "https://web-static3.lovart.ai/lovart_assets/loadingLottie-v2.gif"
+  ],
   "selectors": {
     "entryButtons": [
       "text=/Get started/i",
