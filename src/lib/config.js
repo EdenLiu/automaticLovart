@@ -1,7 +1,8 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const ROOT = path.resolve(__dirname, "..", "..");
+const ROOT = process.cwd();
+const PACKAGE_ROOT = path.resolve(__dirname, "..", "..");
 
 function resolveFromRoot(value) {
   if (!value) return value;
@@ -9,7 +10,16 @@ function resolveFromRoot(value) {
 }
 
 async function readJson(filePath) {
-  const raw = await fs.readFile(resolveFromRoot(filePath), "utf8");
+  const resolved = resolveFromRoot(filePath);
+  let raw;
+  try {
+    raw = await fs.readFile(resolved, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT" && path.basename(filePath) === "lovart.config.json") {
+      throw new Error(`Could not find lovart.config.json in ${ROOT}. Run automatic-lovart-init first.`);
+    }
+    throw error;
+  }
   return JSON.parse(raw);
 }
 
@@ -134,6 +144,7 @@ function parsePositiveInteger(value, fallback) {
 }
 
 module.exports = {
+  PACKAGE_ROOT,
   ROOT,
   loadConfig,
   loadTasks,

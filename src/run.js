@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const { LovartAgent } = require("./lib/lovartAgent");
 const { loadConfig, loadTasks } = require("./lib/config");
 const {
@@ -53,6 +55,7 @@ async function main() {
 
 function printUsage() {
   console.log(`Usage:
+  automatic-lovart [--start-at HH:MM]
   npm run run -- [--start-at HH:MM]
   npm run run:headed -- [--start-at HH:MM]
 

@@ -1,9 +1,20 @@
 {
   "name": "automatic-lovart",
   "version": "0.1.0",
-  "private": true,
   "description": "Lovart browser automation agent for isolated prompt-to-image tasks.",
   "type": "commonjs",
+  "bin": {
+    "automatic-lovart": "src/run.js",
+    "automatic-lovart-auth": "src/auth-real-chrome.js",
+    "automatic-lovart-auth-playwright": "src/auth.js",
+    "automatic-lovart-init": "src/init.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "lovart.config.json",
+    "prompts.example.json"
+  ],
   "scripts": {
     "auth": "node src/auth.js",
     "auth:chrome": "node src/auth-real-chrome.js",

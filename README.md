@@ -6,6 +6,15 @@
 
 运行这个工具需要安装本机 Google Chrome。Lovart/登录校验可能会拒绝 Playwright 自带的 Chromium，所以不要只依赖 `npm run install:browsers` 下载的浏览器。
 
+从 npm 安装后初始化当前目录：
+
+```bash
+npm install -g automatic-lovart
+automatic-lovart-init
+```
+
+本地源码开发：
+
 ```bash
 npm install
 cp prompts.example.json prompts.json
@@ -19,6 +28,12 @@ cp prompts.example.json prompts.json
 
 ```bash
 npm run auth:chrome
+```
+
+如果是 npm 全局安装，也可以运行：
+
+```bash
+automatic-lovart-auth
 ```
 
 脚本会用你本机安装的 Google Chrome 打开 Lovart。你手动登录完成后，回到终端按 Enter，登录态会保存到 `.auth/lovart.storage.json`。脚本不会保存账号密码。
@@ -41,10 +56,17 @@ npm run run:headed
 npm run run
 ```
 
+如果是 npm 全局安装，在初始化后的项目目录运行：
+
+```bash
+automatic-lovart
+```
+
 定时运行。下面的命令会等到本地时间 23:30 再开始执行；如果当前时间已经晚于 23:30，则预约到明天 23:30：
 
 ```bash
 npm run run -- --start-at 23:30
+automatic-lovart --start-at 23:30
 ```
 
 定时等待和任务运行期间，程序会尝试阻止系统休眠，直到本次进程结束。macOS 使用系统自带的 `caffeinate`；Linux 使用 `systemd-inhibit`。如果当前系统不支持，会在终端打印警告并继续执行。
